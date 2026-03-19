@@ -1,0 +1,8 @@
+
+faker==37.1.0
+reportlab>=4.0.0
+pymupdf>=1.24.0
+jsonlines>=4.0.0
+tqdm>=4.66.0
+Pillow>=10.0.0
+
