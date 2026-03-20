@@ -102,6 +102,7 @@ def generate_dataset(
     val_split  : float = 0.1,
     dpi        : int   = 200,
     previews   : int   = 0,
+    layout     : str   = "layout1",  # New parameter for layout selection
 ) -> None:
     """
     Generate n invoices and write train.jsonl + val.jsonl.
@@ -113,6 +114,7 @@ def generate_dataset(
     val_split  : fraction of data to put in val.jsonl  (default 10%)
     dpi        : image render resolution
     previews   : how many PDFs to save to output/previews/ for inspection
+    layout     : layout name (e.g., "layout1", "layout2", "mixed" for random)
     """
     image_dir   = str(Path(output_dir) / "images")
     jsonl_dir   = str(Path(output_dir) / "jsonl")
@@ -139,10 +141,17 @@ def generate_dataset(
          jsonlines.open(val_path,   mode="w") as val_w:
 
         for i in tqdm(range(n), desc="Generating invoices"):
-            invoice_id = f"invoice_{i:04d}"
+            # Select layout (if "mixed", randomly choose)
+            if layout == "mixed":
+                current_layout = random.choice(["layout1", "layout2"])  # Add more as needed
+            else:
+                current_layout = layout
+            
+            invoice_id = f"{current_layout}_invoice_{i:04d}"
             try:
                 # 1. generate randomised data
                 data = generate_invoice_data()
+                data["metadata"]["layout"] = current_layout
 
                 # 2. render data → page images (using ReportLab)
                 image_paths, actual_pages = html_to_images(

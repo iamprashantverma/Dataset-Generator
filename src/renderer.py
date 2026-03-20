@@ -179,8 +179,13 @@ def html_to_images(
     if data is None:
         raise ValueError("data parameter is required for reportlab renderer")
 
-    # 1. Generate PDF bytes using reportlab
-    pdf_bytes = _generate_pdf_with_reportlab(data)
+    layout = data.get("metadata", {}).get("layout", "layout1")
+    
+    # Route to appropriate layout renderer
+    if layout == "layout2":
+        pdf_bytes = _generate_layout2_pdf(data)
+    else:  # layout1 or default
+        pdf_bytes = _generate_layout1_pdf(data)
 
     # 2. PDF bytes → page images (PyMuPDF)
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -209,14 +214,20 @@ def html_to_pdf(html_content: str, output_path: str, data: dict = None) -> None:
     if data is None:
         raise ValueError("data parameter is required for reportlab renderer")
 
+    layout = data.get("metadata", {}).get("layout", "layout1")
+    
+    if layout == "layout2":
+        pdf_bytes = _generate_layout2_pdf(data)
+    else:
+        pdf_bytes = _generate_layout1_pdf(data)
+    
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    pdf_bytes = _generate_pdf_with_reportlab(data)
     
     with open(output_path, 'wb') as f:
         f.write(pdf_bytes)
 
 
-def _generate_pdf_with_reportlab(data: dict) -> bytes:
+def _generate_layout1_pdf(data: dict) -> bytes:
     """
     Generate PDF using ReportLab matching the HTML template structure exactly.
     
@@ -465,6 +476,303 @@ def _generate_pdf_with_reportlab(data: dict) -> bytes:
     story.append(summary_table)
     
     # Build PDF (footer added automatically to all pages)
+    doc.build(story)
+    
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    
+    return pdf_bytes
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# LAYOUT 2: Multi-office law firm invoice (Mosby, Eriksen & Stinson style)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _generate_layout2_pdf(data: dict) -> bytes:
+    """
+    Generate PDF for layout2: Multi-office law firm invoice
+    
+    Structure:
+    - Page 1: Firm header with offices, invoice summary, totals
+    - Page 2+: Time entries 
+    - Last page: Fee Summary by attorney
+    """
+    buffer = BytesIO()
+    
+    seller = data["seller"]
+    buyer = data["buyer"]
+    legal = data["legal_fields"]
+    items = data["line_items"]
+    totals = data["totals"]
+    atty_s = data["attorney_summary"]
+
+    firm = seller["company_name"]
+    inv_num = data["invoice_number"]
+    inv_date = data["invoice_date"]
+    bill_end = data["billing_end"]
+    matter = legal["client_matter_number"]
+    atty = legal["attorney_name"]
+    case = legal["case_title"]
+
+    total_h = totals["total_hours"]
+    total_f = totals["total_fees"]
+    total_i = totals["total_invoice"]
+
+    # Create PDF
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=0.75 * inch,
+        rightMargin=0.75 * inch,
+        topMargin=0.75 * inch,
+        bottomMargin=0.75 * inch,
+    )
+
+    styles = getSampleStyleSheet()
+    
+    firm_style = ParagraphStyle(
+        'FirmName',
+        parent=styles['Normal'],
+        fontSize=16,
+        fontName='Helvetica-Bold',
+        alignment=TA_CENTER,
+        leading=18,
+    )
+    
+    normal_style = ParagraphStyle(
+        'CustomNormal',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=12,
+    )
+    
+    small_style = ParagraphStyle(
+        'SmallNormal',
+        parent=styles['Normal'],
+        fontSize=9,
+        leading=11,
+    )
+    
+    bold_style = ParagraphStyle(
+        'CustomBold',
+        parent=styles['Normal'],
+        fontSize=10,
+        fontName='Helvetica-Bold',
+        leading=12,
+    )
+
+    story = []
+    
+    # ══════════════════════════════════════════════════════════
+    # PAGE 1: SUMMARY PAGE
+    # ══════════════════════════════════════════════════════════
+    
+    # Firm name (centered)
+    story.append(Paragraph(firm, firm_style))
+    story.append(Spacer(1, 12))
+    
+    # Office locations (4 offices in one row)
+    office1 = "<b>New York</b><br/>245 Madison Avenue<br/>New York, NY 10016<br/>Tel: (212) 555-0147"
+    office2 = "<b>Chicago</b><br/>180 W Monroe Street<br/>Chicago, IL 60603<br/>Tel: (312) 555-0192"
+    office3 = "<b>Los Angeles</b><br/>900 Wilshire Blvd<br/>Los Angeles, CA 90017<br/>Tel: (213) 555-0118"
+    office4 = "<b>Manchester</b><br/>600 Morgan St.<br/>Man, CA 90017<br/>Tel: (213) 555-0118"
+    
+    office_data = [[
+        Paragraph(office1, small_style), 
+        Paragraph(office2, small_style),
+        Paragraph(office3, small_style),
+        Paragraph(office4, small_style)
+    ]]
+    office_table = Table(office_data, colWidths=[1.625*inch, 1.625*inch, 1.625*inch, 1.625*inch])
+    office_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+    ]))
+    story.append(office_table)
+    story.append(Spacer(1, 20))
+    
+    # Invoice date and billing period (centered)
+    date_style = ParagraphStyle(
+        'DateCenter',
+        parent=bold_style,
+        alignment=TA_CENTER,
+    )
+    story.append(Paragraph(f"<b>INVOICE DATE: {inv_date}</b>", date_style))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(f"<b>FOR PERIOD THROUGH: {bill_end}</b>", date_style))
+    story.append(Spacer(1, 20))
+    
+    # Client and matter info
+    client_text = f"{buyer['company_name']}<br/>{buyer['address_line1']}<br/>{buyer['address_line2']}"
+    matter_text = f"<b>Matter Number:</b> {matter}<br/><b>Billing Attorney:</b> {atty}<br/><b>Invoice Number:</b> {inv_num}"
+    
+    info_data = [[Paragraph(client_text, normal_style), Paragraph(matter_text, normal_style)]]
+    info_table = Table(info_data, colWidths=[3.25*inch, 3.25*inch])
+    info_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 20))
+    
+    # Re: line
+    story.append(Paragraph(f"<b>Re: {case}</b>", bold_style))
+    story.append(Spacer(1, 30))
+    
+    # Summary totals
+    story.append(Paragraph(f"Total Fees: ${total_f:,.2f}", normal_style))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"Total Fees & Disbursements: ${total_f:,.2f}", normal_style))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"<b>TOTAL THIS INVOICE: ${total_i:,.2f}</b>", bold_style))
+    story.append(Spacer(1, 30))
+    
+    # Remit to
+    story.append(Paragraph("Remit to: 180 W Monroe Street Chicago, IL 60603", normal_style))
+    story.append(Paragraph("<b>Please include invoice number on check</b>", bold_style))
+    
+    # ══════════════════════════════════════════════════════════
+    # PAGE 2: TIME ENTRIES
+    # ══════════════════════════════════════════════════════════
+    story.append(PageBreak())
+    
+    story.append(Paragraph(firm, firm_style))
+    story.append(Spacer(1, 10))
+    
+    # Header with left and right alignment (matching table column widths)
+    left_info = f"{buyer['company_name']}<br/>{buyer['address_line1']}"
+    right_info = f"{inv_date}<br/>Billing Attorney: {atty}<br/>Invoice Number: {inv_num}"
+    
+    # Left section width = Date + Description columns = 0.85 + 3.0 = 3.85"
+    # Right section width = Init + Hours + Rate + Amount = 0.45 + 0.6 + 0.7 + 0.9 = 2.65"
+    header_data = [[Paragraph(left_info, normal_style), Paragraph(right_info, normal_style)]]
+    header_table = Table(header_data, colWidths=[3.85*inch, 2.65*inch], spaceBefore=0, spaceAfter=0)
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ('LEFTPADDING', (0, 0), (0, 0), 0),
+        ('RIGHTPADDING', (1, 0), (1, 0), 0),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 25))
+    
+    story.append(Paragraph(f"For Services through: {bill_end}", normal_style))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(f"<b>Matter #: {matter}</b>", bold_style))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(f"<b>Re: {case}</b>", bold_style))
+    story.append(Spacer(1, 15))
+    
+    # Time entries table
+    table_data = [['Date', 'Description', 'Init', 'Hours', 'Rate', 'Amount']]
+    
+    for item in items:
+        desc_para = Paragraph(item["description"], small_style)
+        table_data.append([
+            item["date"],
+            desc_para,
+            item["initials"],
+            f'{item["hours"]:.2f}',
+            f'${item["rate"]}',
+            f'${item["amount"]:,.2f}'
+        ])
+    
+    # Totals row
+    table_data.append([
+        '', 'Totals', '', f'{total_h:.2f}', '', f'${total_f:,.2f}'
+    ])
+    
+    col_widths = [0.85*inch, 3.0*inch, 0.45*inch, 0.6*inch, 0.7*inch, 0.9*inch]
+    time_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+    
+    time_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
+        ('ALIGN', (4, 0), (4, -1), 'RIGHT'),
+        ('ALIGN', (5, 0), (5, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('LINEABOVE', (0, -1), (-1, -1), 1, colors.black),
+    ]))
+    story.append(time_table)
+    
+    # ══════════════════════════════════════════════════════════
+    # PAGE 3: FEE SUMMARY
+    # ══════════════════════════════════════════════════════════
+    story.append(PageBreak())
+    
+    # Row 1: Firm name, company, case title (left) | Date, Invoice Number, Page (right)
+    # Left section width = Name + Init columns = 2.5 + 0.6 = 3.1"
+    # Right section width = Hours + Eff. Rate + Amount = 0.7 + 1.2 + 1.5 = 3.4"
+    left_row1 = f"<b>{firm}</b><br/><b>{buyer['company_name']}</b><br/><b>{case.upper()}</b>"
+    right_row1 = f"{inv_date}<br/>Invoice Number: {inv_num}<br/><b>Page: 3</b>"
+    
+    row1_data = [[Paragraph(left_row1, normal_style), Paragraph(right_row1, normal_style)]]
+    row1_table = Table(row1_data, colWidths=[3.1*inch, 3.4*inch])
+    row1_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ('LEFTPADDING', (0, 0), (0, 0), 0),
+        ('RIGHTPADDING', (1, 0), (1, 0), 0),
+    ]))
+    story.append(row1_table)
+    story.append(Spacer(1, 40))
+    
+    # Row 2: Client name, address, email (left) | Billing Attorney, Invoice Number (right)
+    left_row2 = f"{buyer['company_name']}<br/>{buyer['address_line1']}<br/>{buyer['email']}"
+    right_row2 = f"<b>Billing Attorney:</b> {atty}<br/><b>Invoice Number:</b> {inv_num}"
+    
+    row2_data = [[Paragraph(left_row2, normal_style), Paragraph(right_row2, normal_style)]]
+    row2_table = Table(row2_data, colWidths=[3.1*inch, 3.4*inch])
+    row2_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+        ('ALIGN', (1, 0), (1, 0), 'RIGHT'),
+        ('LEFTPADDING', (0, 0), (0, 0), 0),
+        ('RIGHTPADDING', (1, 0), (1, 0), 0),
+    ]))
+    story.append(row2_table)
+    story.append(Spacer(1, 30))
+    
+    # Fee Summary
+    story.append(Paragraph("<b>FEE SUMMARY</b>", bold_style))
+    story.append(Spacer(1, 10))
+    
+    summary_data = [['Name', 'Init', 'Hours', 'Eff. Rate', 'Amount']]
+    
+    for ini, d in atty_s.items():
+        summary_data.append([
+            d["name"],
+            ini,
+            f'{d["hours"]:.2f}',
+            f'${d["rate"]}',
+            f'${d["amount"]:,.2f}'
+        ])
+    
+    summary_col_widths = [2.5*inch, 0.6*inch, 0.7*inch, 1.2*inch, 1.5*inch]
+    summary_table = Table(summary_data, colWidths=summary_col_widths)
+    
+    summary_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('LINEBELOW', (0, 0), (-1, 0), 1, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+        ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
+        ('ALIGN', (4, 0), (4, -1), 'RIGHT'),
+        ('TOPPADDING', (0, 0), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+    ]))
+    story.append(summary_table)
+    
+    # Build PDF
     doc.build(story)
     
     pdf_bytes = buffer.getvalue()

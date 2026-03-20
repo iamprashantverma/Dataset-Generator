@@ -33,6 +33,10 @@ def parse_args():
     p.add_argument("--n",        type=int,   default=10,    help="Number of invoices to generate")
     p.add_argument("--output",   type=str,   default="output", help="Root output directory")
     p.add_argument("--val",      type=float, default=0.1,     help="Validation split fraction (default 0.1)")
+    p.add_argument("--dpi",      type=int,   default=200,     help="Image render DPI (default 200)")
+    p.add_argument("--previews", type=int,   default=0,       help="How many PDFs to save for inspection")
+    p.add_argument("--layout",   type=str,   default="layout1", help="Layout to use: layout1, layout2, or mixed (default: layout1)")
+    return p.parse_args()
     p.add_argument("--dpi",      type=int,   default=300,     help="Image render DPI (default 200)")
     p.add_argument("--previews", type=int,   default=0,       help="How many PDFs to save for inspection")
     return p.parse_args()
@@ -45,6 +49,7 @@ if __name__ == "__main__":
     print(f"  Invoice Dataset Generator")
     print(f"{'='*50}")
     print(f"  Invoices : {args.n}")
+    print(f"  Layout   : {args.layout}")
     print(f"  Output   : {args.output}")
     print(f"  Val split: {args.val:.0%}")
     print(f"  DPI      : {args.dpi}")
@@ -57,4 +62,5 @@ if __name__ == "__main__":
         val_split  = args.val,
         dpi        = args.dpi,
         previews   = args.previews,
+        layout     = args.layout,
     )
